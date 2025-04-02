@@ -84,3 +84,7 @@ plt.show()
 
 plt.tight_layout()
 plt.show()
+
+# Define custom binary sequence
+# binary_bits = np.array([0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0])  
+# num_bits = len(binary_bits)  
