@@ -1,110 +1,112 @@
 import numpy as np
+import cv2
 import matplotlib.pyplot as plt
+from scipy.signal import convolve
 
-# Generate Square-Root Raised Cosine (SRRC) Pulse
-def srrc_pulse(t, beta, Tsym):
-    numerator = (np.sin(np.pi * t * (1 - beta) / Tsym) +
-                 4 * beta * t / Tsym * np.cos(np.pi * t * (1 + beta) / Tsym))
-    denominator = (np.pi * t / Tsym) * (1 - (4 * beta * t / Tsym) ** 2) * np.sqrt(Tsym)
+print("Name: Salwin Francis")
+print("Class: S6 ECE")
+print("Roll no: 57")
 
-    # Avoid division by zero
-    denominator = np.where(np.abs(denominator) < 1e-10, 1e-10, denominator)
-    pulse = numerator / denominator
+# ---------------------- Pulse Generator ----------------------
+def srrc_pulse(Tsym, beta, L, Nsym):
+    """
+    Generate Square Root Raised Cosine (SRRC) pulse.    
+    Args:
+        Tsym (float): Symbol duration
+        beta (float): Roll-off factor
+        L (int): Oversampling factor
+        Nsym (int): Filter span in symbols    
+    Returns:
+        np.ndarray: Normalized SRRC pulse
+    """
+    t = np.arange(-Nsym/2, Nsym/2, 1/L)
+    p = np.zeros_like(t)    
+    for i, ti in enumerate(t):
+        if ti == 0:
+            p[i] = (1 - beta + 4 * beta / np.pi) / np.sqrt(Tsym)
+        elif abs(ti) == Tsym / (4 * beta):
+            p[i] = (beta / np.sqrt(2 * Tsym)) * ((1 + 2/np.pi) * np.sin(np.pi/(4 * beta)) + (1 - 2/np.pi) * np.cos(np.pi/(4 * beta)))
+        else:
+            num = (np.sin(np.pi * ti * (1 - beta) / Tsym) + 4 * beta * ti / Tsym * np.cos(np.pi * ti * (1 + beta) / Tsym))
+            denom = (np.pi * ti / Tsym) * (1 - (4 * beta * ti / Tsym) ** 2)
+            p[i] = num / denom
 
-    # Apply L'Hôpital’s Rule at singularities
-    pulse[t == 0] = (1 / np.sqrt(Tsym)) * ((1 - beta) + (4 * beta / np.pi))
-    t_singular = Tsym / (4 * beta)
-    pulse[np.abs(t - t_singular) < 1e-10] = (beta / np.sqrt(2 * Tsym)) * \
-                                            ((1 + 2 / np.pi) * np.sin(np.pi / (4 * beta)) +
-                                             (1 - 2 / np.pi) * np.cos(np.pi / (4 * beta)))
+    return p / np.sqrt(np.sum(p ** 2))
 
-    return pulse
+# ---------------------- Upsample and Filter ----------------------
+def upsample_and_filter(symbols, pulse, L):
+    """Upsamples the symbols and filters with pulse."""
+    upsampled = np.zeros(len(symbols) * L)
+    upsampled[::L] = symbols
+    return convolve(upsampled, pulse, mode='full')
 
-# Generate Random Bitstream
-num_bits = 10000
-binary_bits = np.random.randint(0, 2, num_bits)
+# ---------------------- AWGN ----------------------
+def add_awgn(signal, snr_db):
+    """Adds AWGN noise to the signal."""
+    snr_linear = 10 ** (snr_db / 10)
+    noise_power = 1 / (2 * snr_linear)
+    noise = np.sqrt(noise_power) * np.random.randn(*signal.shape)
+    return signal + noise
 
-# BPSK Mapping (0 → +1, 1 → -1)
-bpsk_symbols = 1 - 2 * binary_bits
+# ---------------------- Matched Filter ----------------------
+def downsample_and_filter(received_signal, pulse, L):
+    """Matched filter and downsample."""
+    matched_output = convolve(received_signal, pulse, mode='full')
+    delay = (len(pulse) - 1) // 2
+    return matched_output[2 * delay + 1::L]
 
-# Parameters
-L = 4  # Oversampling factor
-Tsym = 1  # Symbol duration
-Nsym = 8  # Filter length in symbols
-beta_values = [0.2, 0.5, 0.9]  # Roll-off factors
-snr_values = np.arange(-10, 20, 2)  # SNR range in dB
+# ---------------------- Eye Diagram Plot ----------------------
+def plot_eye_diagram(signal, L, nSamples, nTraces, snr, beta, ax):
+    """Plots Eye Diagram for given SNR and beta."""
+    total_samples = nSamples * nTraces
+    signal = signal[:total_samples]
+    reshaped_signal = signal.reshape(nTraces, nSamples)    
+    for trace in reshaped_signal:
+        ax.plot(trace, color='purple', alpha=0.5)        
+    ax.set_title(f"SNR = {snr} dB | β = {beta}")
+    ax.set_xlabel("Samples")
+    ax.set_ylabel("Amplitude")
+    ax.grid(True, linestyle='--', alpha=0.5)
 
-# BER Results Storage
-ber_results = {}
+# ---------------------- Main Simulation ----------------------
+def simulate_eye_diagram():
+    """Main simulation to generate multiple eye diagrams."""
+    
+    # Load Image (Ensure path is correct)
+    image_path = r"C:\Users\salwi\Downloads\cameraman.png"
+    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)    
+    if image is None:
+        raise FileNotFoundError(f"Image not found at {image_path}. Check the path.")    
+    
+    # Convert Image to Bitstream
+    bits = np.unpackbits(image.flatten())
+    symbols = np.where(bits == 0, -1, 1)
 
-# Iterate over different β values
-for beta in beta_values:
-    print(f"Processing for roll-off factor β = {beta}...", flush=True)
-    ber_results[beta] = []
+    # Simulation Parameters
+    Tsym, L, Nsym = 1, 4, 8
+    snr_values = [-5, 0, 10, 20]
+    beta_values = [0.2, 0.8]
+    
+    print("\n--- Parameters ---")
+    print("SNR values:", snr_values)
+    print("Beta values:", beta_values)
 
-    # Create time vector
-    t = np.arange(-Nsym/2, Nsym/2 + 1/L, 1/L)
-    srrc_filter = srrc_pulse(t, beta, Tsym)
+    # Setup Figure
+    fig, axes = plt.subplots(len(snr_values), len(beta_values), figsize=(12, 10))
+    fig.suptitle("Eye Diagrams for Various SNR & Beta", fontsize=16)
 
-    # Upsample: Insert L-1 zeros
-    upsampled_symbols = np.zeros(L * len(bpsk_symbols))
-    upsampled_symbols[::L] = bpsk_symbols
+    # Iterate over SNR and Beta values
+    for i, snr in enumerate(snr_values):
+        for j, beta in enumerate(beta_values):
+            pulse = srrc_pulse(Tsym, beta, L, Nsym)
+            tx_signal = upsample_and_filter(symbols, pulse, L)
+            rx_signal = add_awgn(tx_signal, snr)
+            mf_output = downsample_and_filter(rx_signal, pulse, L)
 
-    # Pulse shaping (Tx Filter)
-    shaped_signal = np.convolve(upsampled_symbols, srrc_filter, mode='same')
+            # Plot Eye Diagram
+            plot_eye_diagram(mf_output, L, nSamples=3 * L, nTraces=100, snr=snr, beta=beta, ax=axes[i, j])
 
-    for snr_db in snr_values:
-        print(f"  Processing for SNR = {snr_db} dB...", flush=True)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.show()
 
-        # Add AWGN Noise
-        snr_linear = 10 ** (snr_db / 10)
-        noise_variance = 1 / (2 * snr_linear)  # Assume Es = 1
-        noise = np.sqrt(noise_variance) * np.random.randn(len(shaped_signal))
-        received_signal = shaped_signal + noise  # BPSK is real, so add real noise
-
-        # Matched Filter (Rx Filter)
-        matched_filter = srrc_filter[::-1]
-        filtered_output = np.convolve(received_signal, matched_filter, mode='same')
-
-        # Compute Total Delay
-        delta = (len(srrc_filter) - 1) // 2  # One filter delay
-        total_delay = 2 * delta  # Tx and Rx filter delay
-        valid_start = int(total_delay)
-
-        # Downsample at every L-th position
-        downsampled_symbols = filtered_output[valid_start::L]
-
-        # Decision Device (Threshold at 0)
-        detected_bits = (downsampled_symbols < 0).astype(int)
-
-        # Compute BER
-        bit_errors = np.sum(detected_bits != binary_bits[:len(detected_bits)])
-        ber = bit_errors / len(detected_bits)
-        ber_results[beta].append(ber)
-
-        # Plot Eye Diagram for selected cases
-        if snr_db in [-10, 0, 10]:
-            plt.figure(figsize=(8, 5))
-            nTraces = 100
-            nSamples = 3 * L
-            for i in range(nTraces):
-                start = np.random.randint(0, len(downsampled_symbols) - nSamples)
-                plt.plot(np.arange(nSamples), downsampled_symbols[start:start + nSamples], 'b', alpha=0.3)
-            
-            plt.title(f"Eye Diagram (β={beta}, SNR={snr_db} dB)")
-            plt.xlabel("Time")
-            plt.ylabel("Amplitude")
-            plt.grid(True)
-            plt.show()
-
-# Plot SNR vs BER Curve
-plt.figure(figsize=(8, 6))
-for beta, ber in ber_results.items():
-    plt.semilogy(snr_values, ber, marker='o', label=f'β = {beta}')
-
-plt.xlabel("SNR (dB)")
-plt.ylabel("Bit Error Rate (BER)")
-plt.title("SNR vs BER Curve")
-plt.legend()
-plt.grid(True, which='both')
-plt.show()
+simulate_eye_diagram()
